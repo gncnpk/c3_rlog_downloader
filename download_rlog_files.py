@@ -8,6 +8,7 @@ import paramiko
 from pathlib import Path
 import io
 import stat
+import platform
 
 # ========= MODIFY THESE If you want to =========
 diroutbase = os.path.expanduser("~/Downloads/rlogs")
@@ -21,6 +22,11 @@ remote_data_dir = "/data/media/0/realdata" # pretty sure this wont change
 # ====
 
 def is_on_home_wifi():
+    # Skip WiFi check on Windows
+    if platform.system() == "Windows":
+        print("Windows detected, skipping WiFi check")
+        return True
+    
     try:
         output = subprocess.check_output(["ifconfig"]).decode()
         return any(x in output for x in ["192.168.", "10.0.", "10.1.", "200.200."])
