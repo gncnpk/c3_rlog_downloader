@@ -22,13 +22,12 @@ remote_data_dir = "/data/media/0/realdata" # pretty sure this wont change
 # ====
 
 def is_on_home_wifi():
-    # Skip WiFi check on Windows
-    if platform.system() == "Windows":
-        print("Windows detected, skipping WiFi check")
-        return True
-    
     try:
-        output = subprocess.check_output(["ifconfig"]).decode()
+        if platform.system() == "Windows":
+            output = subprocess.check_output(["ipconfig"], shell=True).decode()
+        else:
+            output = subprocess.check_output(["ifconfig"]).decode()
+        
         return any(x in output for x in ["192.168.", "10.0.", "10.1.", "200.200."])
     except subprocess.CalledProcessError:
         return False
@@ -115,12 +114,45 @@ def fetch_rlogs(device_host, label):
     ssh.close()
 
 def compress_unzipped_rlogs(base_dir):
+    import gzip
+    import shutil
+    
+    # Check if zstd is available first (best compression)
+    zstd_available = False
+    try:
+        subprocess.run(["zstd", "--version"], capture_output=True, check=True)
+        zstd_available = True
+        print("Using zstd compression...")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("zstd not found, using built-in gzip compression...")
+    
     for root, dirs, files in os.walk(base_dir):
         for file in files:
             if file.endswith("rlog"):
                 full_path = os.path.join(root, file)
-                print(f"Compressing {full_path}")
-                subprocess.run(["zstd", "--rm", "-f", full_path])
+                
+                if zstd_available:
+                    # Use zstd if available
+                    print(f"Compressing with zstd: {full_path}")
+                    try:
+                        subprocess.run(["zstd", "--rm", "-f", full_path], check=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"Failed to compress {full_path}: {e}")
+                else:
+                    # Use Python's built-in gzip compression
+                    compressed_path = full_path + ".gz"
+                    print(f"Compressing with gzip: {full_path} → {compressed_path}")
+                    try:
+                        with open(full_path, 'rb') as f_in:
+                            with gzip.open(compressed_path, 'wb') as f_out:
+                                shutil.copyfileobj(f_in, f_out)
+                        # Remove original file after successful compression
+                        os.remove(full_path)
+                    except Exception as e:
+                        print(f"Failed to compress {full_path}: {e}")
+                        # Remove incomplete compressed file if it exists
+                        if os.path.exists(compressed_path):
+                            os.remove(compressed_path)
 
 def main():
     for host, label in device_car_list:
