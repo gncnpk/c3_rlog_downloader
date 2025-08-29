@@ -44,7 +44,7 @@ import time
 # Configuration
 REMOTE_NAME = "gdrive"  # Name of your rclone remote (change if different)
 GOOGLE_DRIVE_FOLDER = "rlogs"  # Main folder name in Google Drive
-MAX_FOLDER_SIZE_GB = 2.0  # Maximum size per device folder in GB
+MAX_FOLDER_SIZE_GB = 1.9  # Maximum size per device folder in GB
 MAX_FOLDER_SIZE_BYTES = int(MAX_FOLDER_SIZE_GB * 1024 * 1024 * 1024)
 
 # Get directories
@@ -244,8 +244,9 @@ class RCloneUploader:
                 str(temp_dir),
                 remote_dest,
                 "--progress",
-                "--transfers", "4",  # Parallel transfers
-                "--checkers", "8",   # Parallel file checks
+                "--transfers", "16",  # Parallel transfers
+                "--checkers", "16",   # Parallel file checks
+                "--tpslimit", "100",   # Transfers per second limit
                 "--retries", "3",    # Retry failed transfers
                 "--low-level-retries", "10",
                 "--stats", "30s",    # Stats every 30 seconds
