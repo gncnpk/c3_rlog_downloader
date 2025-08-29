@@ -387,7 +387,7 @@ def run_device_management():
     try:
         # Load device configuration and run management
         devices = download_module.manage_device_config()
-        print_colored(f"✅ Device management completed. {len(devices)} device(s) configured.", Colors.GREEN)
+        print_colored(f"✅ {len(devices)} device(s) configured.", Colors.GREEN)
     except Exception as e:
         print_colored(f"❌ Device management error: {e}", Colors.RED)
 
