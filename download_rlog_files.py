@@ -1,5 +1,11 @@
 # python version of https://github.com/mmmorks/sunnypilot/blob/staging-merged/tools/tuning/rlog_copy_from_device_then_zip1.sh
 # downloads rlogs of your device, using a previously saved ssh key thing
+# 
+# Windows Compatibility Notes:
+# - File paths are automatically sanitized for Windows naming restrictions
+# - SSH key paths use forward slashes for rsync compatibility
+# - Supports both WSL and native Windows rsync installations
+# - Falls back gracefully from rsync to SFTP if rsync is not available
 
 import os
 import time
@@ -75,7 +81,7 @@ def find_ssh_keys():
         if not is_key and '.' not in item and os.path.isfile(item_path):
             # Try to detect if it's likely an SSH key by reading first line
             try:
-                with open(item_path, 'r') as f:
+                with open(item_path, 'r', encoding='utf-8') as f:
                     first_line = f.readline().strip()
                     if 'PRIVATE KEY' in first_line or first_line.startswith('-----'):
                         is_key = True
@@ -335,13 +341,91 @@ def manage_device_config():
     
     return devices
 
+def sanitize_filename(filename):
+    """Sanitize filename for Windows compatibility."""
+    # Replace problematic characters for Windows
+    invalid_chars = '<>:"|?*'
+    for char in invalid_chars:
+        filename = filename.replace(char, '_')
+    
+    # Also replace any remaining path separators
+    filename = filename.replace('/', '_').replace('\\', '_')
+    
+    # Remove or replace problematic sequences
+    filename = filename.replace('..', '__')
+    
+    # Ensure filename isn't too long (Windows has 260 char path limit)
+    if len(filename) > 200:
+        name_part, ext = os.path.splitext(filename)
+        filename = name_part[:200-len(ext)] + ext
+    
+    return filename
+
 def connect_ssh(host, username, ssh_key):
+    """Connect to SSH with better error handling and Windows support."""
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    # use the pre-loaded key from the private_key_str
-    client.connect(hostname=host, username=username, allow_agent=True, look_for_keys=True, key_filename=ssh_key)
-    #client.connect(hostname=host, username=ssh_username, pkey=key)
-    return client
+    
+    print(f"Attempting to connect to {host} as user '{username}'")
+    
+    try:
+        # First try with the specified key file
+        if ssh_key and os.path.exists(ssh_key):
+            print(f"Connecting using SSH key: {ssh_key}")
+            
+            # Try different key types for better Windows compatibility
+            key_loaded = False
+            for key_class in [paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey]:
+                try:
+                    if 'passphrase' in ssh_key or 'password' in ssh_key:
+                        # Key might be password protected
+                        try:
+                            key = key_class.from_private_key_file(ssh_key)
+                            client.connect(hostname=host, username=username, pkey=key, timeout=30)
+                            key_loaded = True
+                            break
+                        except paramiko.ssh_exception.PasswordRequiredException:
+                            password = input(f"Enter passphrase for key {ssh_key}: ")
+                            key = key_class.from_private_key_file(ssh_key, password=password)
+                            client.connect(hostname=host, username=username, pkey=key, timeout=30)
+                            key_loaded = True
+                            break
+                    else:
+                        key = key_class.from_private_key_file(ssh_key)
+                        client.connect(hostname=host, username=username, pkey=key, timeout=30)
+                        key_loaded = True
+                        break
+                except (paramiko.ssh_exception.SSHException, ValueError, FileNotFoundError):
+                    continue
+            
+            if not key_loaded:
+                print("Failed to load the specified key, falling back to SSH agent...")
+                client.connect(hostname=host, username=username, allow_agent=True, look_for_keys=True, timeout=30)
+        else:
+            # Fallback to agent/system keys
+            print("No valid SSH key specified, using SSH agent or system keys...")
+            client.connect(hostname=host, username=username, allow_agent=True, look_for_keys=True, timeout=30)
+            
+        print("Successfully connected!")
+        return client
+        
+    except paramiko.AuthenticationException as e:
+        print(f"Authentication failed: {e}")
+        print("\nTroubleshooting steps:")
+        print("1. Make sure you've copied your PUBLIC key to the device:")
+        if ssh_key and os.path.exists(ssh_key):
+            pub_key_path = ssh_key + ".pub"
+            if os.path.exists(pub_key_path):
+                with open(pub_key_path, 'r', encoding='utf-8') as f:
+                    pub_key_content = f.read().strip()
+                print(f"   Your public key content: {pub_key_content}")
+                print(f"   Copy this to your device's /home/{username}/.ssh/authorized_keys file")
+        print("2. Make sure SSH is enabled on your device")
+        print(f"3. Try connecting manually with: ssh {username}@{host}")
+        raise
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        raise
 
 def run_ssh_command(ssh, cmd):
     stdin, stdout, stderr = ssh.exec_command(cmd)
@@ -419,6 +503,9 @@ def fetch_rlogs_rsync(device):
         else:
             expected_filename = f"{dongle_id}--{filename}"
         
+        # Sanitize filename for Windows compatibility
+        expected_filename = sanitize_filename(expected_filename)
+        
         if expected_filename not in existing_files:
             files_needed.append(remote_file)
             
@@ -453,10 +540,14 @@ def fetch_rlogs_rsync(device):
             "rsync",
             "-avz",
             "--progress",
-            "-e", f"ssh -i {ssh_key} -o StrictHostKeyChecking=no",
+            "-e", f"ssh -i \"{ssh_key}\" -o StrictHostKeyChecking=no",
             rsync_source,
             str(local_file_path)
         ]
+        
+        # On Windows, handle path separators correctly
+        if platform.system() == "Windows":
+            rsync_cmd[-1] = str(local_file_path).replace('\\', '/')
         
         try:
             print(f"Downloading {relative_path}...")
@@ -465,7 +556,9 @@ def fetch_rlogs_rsync(device):
         except subprocess.CalledProcessError as e:
             print(f"Failed to download {relative_path}: {e}")
     
-    print(f"{device_host} ({label}): Downloaded {files_downloaded} files successfully")    # Rename files to match the original naming convention (dongle_id|route--filename)
+    print(f"{device_host} ({label}): Downloaded {files_downloaded} files successfully")
+    
+    # Rename files to match the original naming convention (dongle_id|route--filename)
     print(f"{device_host} ({label}): Renaming files to match original convention...")
     rename_rsync_files(output_dir, dongle_id, remote_data_dir)
 
@@ -499,6 +592,9 @@ def rename_rsync_files(output_dir, dongle_id, remote_data_dir):
                     new_filename = f"{dongle_id}|{route}--{file}"
                 else:
                     new_filename = f"{dongle_id}--{file}"
+                
+                # Sanitize filename for Windows compatibility
+                new_filename = sanitize_filename(new_filename)
                 
                 new_path = output_dir / new_filename
                 
@@ -567,13 +663,15 @@ def fetch_rlogs_sftp(device):
             for dirpath, dirnames, filenames in sftp_walk(sftp, path):
                 for file in filenames:
                     if "rlog" in file:
-                        yield os.path.join(dirpath, file)
+                        # Use forward slashes for remote paths
+                        yield dirpath.rstrip('/') + '/' + file
         except Exception as e:
             print(f"Error walking remote path: {e}")
 
     import stat
 
     def sftp_walk(sftp, remotepath):
+        """Walk through SFTP directory structure with Windows compatibility."""
         path_stack = [remotepath]
         while path_stack:
             current_path = path_stack.pop()
@@ -582,7 +680,8 @@ def fetch_rlogs_sftp(device):
                 folders = []
                 for entry in sftp.listdir_attr(current_path):
                     fname = entry.filename
-                    fullpath = os.path.join(current_path, fname)
+                    # Use forward slashes for remote paths (Unix-style)
+                    fullpath = current_path.rstrip('/') + '/' + fname
                     if stat.S_ISDIR(entry.st_mode):
                         folders.append(fullpath)
                     else:
@@ -596,12 +695,26 @@ def fetch_rlogs_sftp(device):
         route = filepath.replace(remote_data_dir + "/", "").rsplit("/", 1)[0]
         filename = filepath.rsplit("/", 1)[-1]
         local_filename = f"{dongle_id}|{route}--{filename}"
+        
+        # Sanitize filename for Windows compatibility
+        local_filename = sanitize_filename(local_filename)
+        
         local_path = output_dir / local_filename
         if local_path.exists():
             continue
         try:
             print(f"Downloading {filepath} → {local_filename}")
+            
+            # Show file size for progress indication (if available)
+            try:
+                file_stat = sftp.stat(filepath)
+                file_size = file_stat.st_size
+                print(f"  File size: {file_size / (1024*1024):.1f} MB")
+            except:
+                pass
+                
             sftp.get(filepath, str(local_path))
+            print(f"  ✓ Download completed")
         except Exception as e:
             print(f"Failed to download {filepath}: {e}")
 
@@ -637,7 +750,11 @@ def compress_unzipped_rlogs(base_dir):
                     # Use zstd if available
                     print(f"Compressing with zstd: {full_path}")
                     try:
-                        subprocess.run(["zstd", "--rm", "-f", full_path], check=True)
+                        # On Windows, handle path quoting for subprocess
+                        if platform.system() == "Windows":
+                            subprocess.run(["zstd", "--rm", "-f", str(full_path)], check=True, shell=True)
+                        else:
+                            subprocess.run(["zstd", "--rm", "-f", full_path], check=True)
                     except subprocess.CalledProcessError as e:
                         print(f"Failed to compress {full_path}: {e}")
                 else:
@@ -657,9 +774,12 @@ def compress_unzipped_rlogs(base_dir):
                             os.remove(compressed_path)
 
 def main():
+    print(f"Cross-platform rlog downloader (Windows/macOS/Linux)")
     print(f"Using transfer method: {transfer_method}")
     if transfer_method.lower() == "rsync" and not is_rsync_available():
         print("Warning: rsync not found, will fall back to SFTP if needed")
+        if platform.system() == "Windows":
+            print("Tip: Install Git for Windows or WSL to enable rsync support")
     
     # Load or create device configuration
     device_list = manage_device_config()
