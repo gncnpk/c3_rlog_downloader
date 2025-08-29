@@ -4,6 +4,13 @@ This comprehensive toolkit connects to your Comma 3/3X device to download drivin
 
 ## 🚀 Features
 
+### 🎯 **Unified RLog Manager** (`comma_rlog_manager.py`)
+- **All-in-one solution**: Single script handles setup, downloading, uploading, and management
+- **Interactive menu system**: Easy-to-use interface for all operations
+- **Cross-platform launchers**: Simple `.bat` (Windows) and `.sh` (Unix) scripts
+- **Automated setup**: Installs Python dependencies and configures rclone
+- **Complete workflow**: Download → Compress → Upload → Report in one command
+
 ### 📥 **Route Log Downloader** (`download_rlog_files.py`)
 - **Cross-platform support**: Works on Windows, macOS, and Linux
 - **Multiple transfer methods**: Supports both rsync (faster) and SFTP
@@ -18,7 +25,6 @@ This comprehensive toolkit connects to your Comma 3/3X device to download drivin
 - **Device management**: Store and manage multiple device configurations
 - **Windows compatibility**: Handles Windows path limitations and file naming requirements
 - **Progress tracking**: Shows download progress and file sizes
-- **Automatic size reporting**: Reports device folder sizes and compression statistics after each run
 
 ### ☁️ **Google Drive Upload** (`upload_to_google_drive_rclone.py`)
 - **RClone-powered uploads**: Fast, reliable transfers using native rclone binary
@@ -57,7 +63,28 @@ Google Drive/rlogs/
     └── dongle_id_part2/     # < 2GB
 ```
 
-## 📋 Prerequisites
+## � Quick Start
+
+**Windows:**
+```cmd
+# Download and double-click launch_rlog_manager.bat
+# OR run from command prompt:
+launch_rlog_manager.bat
+```
+
+**macOS/Linux:**
+```bash
+# Make executable and run:
+chmod +x launch_rlog_manager.sh
+./launch_rlog_manager.sh
+```
+
+The unified launcher will guide you through:
+1. **Initial setup** (Python dependencies, rclone configuration)
+2. **Device configuration** (SSH keys, device IPs)
+3. **Choose workflow**: Download rlogs, upload to Google Drive, size reports, or complete workflow
+
+## �📋 Prerequisites
 
 ### For Route Log Downloading
 1. **SSH access to your Comma device** - Follow the [official SSH setup guide](https://github.com/commaai/openpilot/wiki/SSH)
@@ -187,7 +214,31 @@ Follow prompts:
 
 ## 🎯 Usage
 
-### Download RLogs from Comma Device
+### Unified RLog Manager (Recommended)
+
+**Windows:**
+```cmd
+# Double-click the launcher or run:
+launch_rlog_manager.bat
+```
+
+**macOS/Linux:**
+```bash
+# Make executable and run:
+chmod +x launch_rlog_manager.sh
+./launch_rlog_manager.sh
+```
+
+The unified manager provides an interactive menu with options for:
+- **Setup**: Install dependencies and configure rclone
+- **Download**: Download rlogs from your Comma device(s)
+- **Upload**: Upload rlogs to Google Drive
+- **Manage**: Device configuration and size reporting
+- **Complete Workflow**: Download → Compress → Upload → Report
+
+### Individual Scripts (Advanced Users)
+
+#### Download RLogs from Comma Device
 
 **Windows:**
 ```cmd
@@ -207,22 +258,6 @@ On first run, you'll be guided through:
 1. **Device setup**: Add your device's IP address and choose a subfolder name
 2. **SSH key selection**: The script will find and help you select the right SSH key
 3. **Configuration saving**: Your settings are saved for future runs
-
-### Interactive Device Management
-
-After devices are configured, the script provides an interactive menu with these options:
-- **(a)dd device**: Add a new Comma device
-- **(r)emove device**: Remove an existing device from configuration
-- **(e)dit device**: Modify device settings (hostname, username, SSH key, etc.)
-- **(l)ist devices**: Show all configured devices with details
-- **(s)ize report**: Generate detailed storage usage report for all devices
-- **(c)ontinue**: Proceed with downloading rlogs
-
-The **size report** option shows:
-- Total storage used per device
-- File counts by compression type (zstd, gzip, uncompressed)
-- Compression efficiency statistics
-- Potential storage savings from compression
 
 ### Upload RLogs to Google Drive
 
@@ -260,7 +295,6 @@ The rlog downloader provides an interactive menu to:
 - **Edit existing device settings**
 - **Remove devices**
 - **List all configured devices**
-- **Generate size reports** (view device storage usage and compression statistics)
 
 ### Transfer Methods (Rlog Downloader)
 You can choose between:
@@ -446,16 +480,14 @@ echo "Backup complete!"
 ## 📚 Project Structure
 
 ```
-rlog_aggregation/
-├── download_rlog_files.py          # Main rlog downloader script
+c3_rlog_downloader/
+├── comma_rlog_manager.py           # 🎯 UNIFIED MANAGER - All functionality in one script
+├── launch_rlog_manager.bat         # 🖥️  Windows launcher (double-click to run)
+├── launch_rlog_manager.sh          # 🐧 Unix launcher (macOS/Linux)
+├── download_rlog_files.py          # Core rlog downloader script
 ├── upload_to_google_drive_rclone.py # Google Drive upload script
+├── report_device_sizes.py          # Standalone device size reporter
 ├── requirements.txt                 # Python dependencies
-├── setup_windows.bat               # Windows setup script
-├── setup_unix.sh                   # macOS/Linux setup script  
-├── setup_google_drive.bat          # Windows rclone setup
-├── setup_google_drive.sh           # Linux rclone setup
-├── run_rlog_downloader.bat         # Windows launcher (created by setup)
-├── run_rlog_downloader.sh          # Unix launcher (created by setup)
 ├── devices_config.json             # Device configuration (created on first run)
 ├── rlogs/                          # Downloaded rlog files
 │   ├── device1/
@@ -464,6 +496,11 @@ rlog_aggregation/
 │       └── dongle_id/
 └── README.md                       # This file
 ```
+
+**Simplified Workflow:**
+1. Download: `git clone` or download this repository
+2. Run: Double-click `launch_rlog_manager.bat` (Windows) or `./launch_rlog_manager.sh` (Unix)
+3. Follow the interactive setup and usage prompts
 
 ## 🤝 Contributing
 
