@@ -135,12 +135,12 @@ def select_ssh_key():
     
     elif len(keys) == 1:
         key_path = keys[0]
-        use_key = input(f"Found SSH key: {key_path}\nUse this key? (y/n): ").strip().lower()
-        if use_key in ['y', 'yes']:
-            return key_path
-        else:
+        use_key = input(f"Found SSH key: {key_path}\nUse this key? (Y/n): ").strip().lower()
+        if use_key in ['n', 'no']:
             manual_key = input("Enter the path to your SSH private key: ").strip()
             return os.path.expanduser(manual_key) if manual_key else None
+        else:
+            return key_path
     
     else:
         print("Multiple SSH keys found:")
