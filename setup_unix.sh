@@ -34,11 +34,81 @@ else
 fi
 
 echo "Installing Python dependencies..."
-$PIP_CMD install -r requirements.txt
 
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to install dependencies"
-    exit 1
+# Check if we're in an externally managed environment
+if $PIP_CMD install --dry-run paramiko 2>&1 | grep -q "externally-managed-environment"; then
+    echo "Detected externally managed Python environment (common on Ubuntu 22.04+)"
+    echo "Creating virtual environment for better compatibility..."
+    
+    # Create virtual environment
+    if ! $PYTHON_CMD -m venv venv; then
+        echo "Failed to create virtual environment. Installing python3-venv..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y python3-venv python3-full
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y python3-venv
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y python3-venv
+        else
+            echo "Please install python3-venv manually for your distribution"
+            exit 1
+        fi
+        
+        # Try creating venv again
+        if ! $PYTHON_CMD -m venv venv; then
+            echo "Still failed to create virtual environment"
+            exit 1
+        fi
+    fi
+    
+    # Activate virtual environment and install dependencies
+    source venv/bin/activate
+    pip install -r requirements.txt
+    
+    if [ $? -eq 0 ]; then
+        echo
+        echo "✓ Dependencies installed successfully in virtual environment!"
+        
+        # Create wrapper script
+        cat > run_rlog_downloader.sh << 'EOF'
+#!/bin/bash
+# Simple wrapper script to run the rlog downloader with virtual environment
+cd "$(dirname "$0")"
+if [ -d "venv" ]; then
+    source venv/bin/activate
+    python download_rlog_files.py "$@"
+    deactivate
+else
+    python download_rlog_files.py "$@"
+fi
+EOF
+        chmod +x run_rlog_downloader.sh
+        
+        echo "  Created wrapper script 'run_rlog_downloader.sh'"
+        echo "  To run the script:"
+        echo "    ./run_rlog_downloader.sh"
+        echo "  Or manually:"
+        echo "    source venv/bin/activate"
+        echo "    python download_rlog_files.py"
+        echo "    deactivate  # when done"
+    else
+        echo "Failed to install dependencies in virtual environment"
+        exit 1
+    fi
+else
+    # Normal pip install
+    $PIP_CMD install -r requirements.txt
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ Dependencies installed successfully!"
+    else
+        echo "Error: Failed to install dependencies"
+        echo "You may need to:"
+        echo "  1. Create a virtual environment: python3 -m venv venv && source venv/bin/activate"
+        echo "  2. Install system packages: sudo apt-get install python3-paramiko"
+        echo "  3. Use pipx: pipx install --include-deps paramiko"
+        exit 1
+    fi
 fi
 
 # Check for optional tools
@@ -63,4 +133,11 @@ fi
 
 echo
 echo "Setup completed successfully!"
-echo "You can now run: $PYTHON_CMD download_rlog_files.py"
+if [ -d "venv" ]; then
+    echo "Virtual environment created. To run the script:"
+    echo "  ./run_rlog_downloader.sh  # uses wrapper script"
+    echo "Or manually:"
+    echo "  source venv/bin/activate && python download_rlog_files.py && deactivate"
+else
+    echo "You can now run: $PYTHON_CMD download_rlog_files.py"
+fi

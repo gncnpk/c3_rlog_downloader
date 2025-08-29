@@ -39,15 +39,49 @@ chmod +x setup_unix.sh
 ./setup_unix.sh
 ```
 
+**Note**: Both setup scripts will automatically create a Python virtual environment if the standard pip install fails, and provide convenient wrapper scripts (`run_rlog_downloader.bat` on Windows, `run_rlog_downloader.sh` on Unix) for easy execution.
+
 ### Manual Setup
 
 1. **Clone or download this repository**
+
 2. **Install Python dependencies**:
+   
+   **Most systems:**
    ```bash
    pip install -r requirements.txt
    ```
    
-   Or install manually:
+   **Windows:**
+   ```cmd
+   # Option 1: Standard install
+   pip install -r requirements.txt
+   
+   # Option 2: Virtual environment (if standard fails)
+   python -m venv venv
+   venv\Scripts\activate.bat
+   pip install -r requirements.txt
+   REM Run script with: python download_rlog_files.py
+   REM Deactivate with: venv\Scripts\deactivate.bat
+   ```
+   
+   **Ubuntu 22.04+/Debian 12+ (externally managed environment):**
+   ```bash
+   # Option 1: Use virtual environment (recommended)
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   # Run script with: python download_rlog_files.py
+   # Deactivate with: deactivate
+   
+   # Option 2: System packages
+   sudo apt-get install python3-paramiko
+   
+   # Option 3: pipx
+   pipx install --include-deps paramiko
+   ```
+   
+   **Or install manually:**
    ```bash
    pip install paramiko
    ```
@@ -99,8 +133,19 @@ Make sure you have SSH keys set up for your Comma device:
 
 ### Basic Usage
 Simply run the script:
+
+**Windows:**
+```cmd
+python download_rlog_files.py
+REM Or if you used setup_windows.bat with virtual env:
+run_rlog_downloader.bat
+```
+
+**macOS/Linux:**
 ```bash
 python download_rlog_files.py
+# Or if you used setup_unix.sh with virtual env:
+./run_rlog_downloader.sh
 ```
 
 On first run, you'll be guided through:
@@ -167,6 +212,17 @@ transfer_method = "rsync"  # or "sftp"
 **"Device is onroad"**
 - The script only downloads when the device is in "offroad" mode for safety
 - Park your car and wait for the device to go offroad
+
+**"externally-managed-environment" (Linux)**
+- This is common on Ubuntu 22.04+ and Debian 12+
+- Use the setup script which creates a virtual environment automatically
+- Or manually: `python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt`
+- Alternative: `sudo apt-get install python3-paramiko` or `pipx install --include-deps paramiko`
+
+**"Failed to install dependencies" (Windows)**
+- The setup script will automatically try creating a virtual environment
+- Or manually: `python -m venv venv && venv\Scripts\activate.bat && pip install -r requirements.txt`
+- Make sure you have Python installed with pip support
 
 ### File Naming on Windows
 The script automatically handles Windows file naming restrictions by:
