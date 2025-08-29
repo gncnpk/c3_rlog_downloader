@@ -6,7 +6,7 @@ Comma 3/3X Route Log Management Suite - Unified Launcher
 A comprehensive Python wrapper that combines all functionality:
 - Setup (Python dependencies, rclone configuration)
 - Device management (add/edit/remove devices, size reports)
-- Download route logs from Comma devices
+- Download route logs from Comma 3/3X devices
 - Upload to Google Drive
 - Complete workflow automation
 
@@ -393,7 +393,7 @@ def run_device_management():
 
 def run_download():
     """Run rlog download process"""
-    print_header("📥 DOWNLOAD ROUTE LOGS")
+    print_header("📥 DOWNLOAD FROM COMMA 3/3X")
     
     # Import download module
     download_module = import_script_module("download.py")
@@ -520,7 +520,7 @@ def show_main_menu():
     print_colored("-" * 30, Colors.CYAN)
     print_colored("1. 🛠️  Setup & Configuration", Colors.WHITE)
     print_colored("2. 📱 Device Management", Colors.WHITE)
-    print_colored("3. 📥 Download Route Logs", Colors.WHITE)
+    print_colored("3. 📥 Download from Comma 3/3X", Colors.WHITE)
     print_colored("4. ☁️  Upload to Google Drive", Colors.WHITE)
     print_colored("5. 📊 Device Size Report", Colors.WHITE)
     print_colored("6. 🔄 Complete Workflow (Download + Upload)", Colors.WHITE)
@@ -537,7 +537,7 @@ def show_help():
     print()
     print_colored("• Setup & Configuration: Install dependencies and configure rclone", Colors.GREEN)
     print_colored("• Device Management: Add/edit/remove devices, view size reports", Colors.GREEN) 
-    print_colored("• Download Route Logs: Download rlogs from your Comma device(s)", Colors.GREEN)
+    print_colored("• Download from Comma 3/3X: Download rlogs from your Comma device(s)", Colors.GREEN)
     print_colored("• Upload to Google Drive: Backup rlogs to cloud storage", Colors.GREEN)
     print_colored("• Size Reports: View storage usage and compression statistics", Colors.GREEN)
     print_colored("• Complete Workflow: Automated download → compress → upload process", Colors.GREEN)
