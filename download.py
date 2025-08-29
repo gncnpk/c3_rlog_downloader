@@ -262,12 +262,12 @@ def manage_device_config():
                 print(f"Added device: {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
             
             while True:
-                add_more = input("\nAdd another device? (y/n): ").strip().lower()
-                if add_more in ['y', 'yes', 'n', 'no']:
+                add_more = input("\nAdd another device? (y/N): ").strip().lower()
+                if add_more in ['y', 'yes', 'n', 'no', '']:
                     break
                 print("Please enter 'y' or 'n'")
             
-            if add_more in ['n', 'no']:
+            if add_more in ['n', 'no', '']:
                 break
         
         save_device_config(devices)
@@ -277,9 +277,9 @@ def manage_device_config():
             print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
         
         while True:
-            action = input("\n(a)dd device, (r)emove device, (e)dit device, (l)ist devices, (s)ize report, or (c)ontinue: ").strip().lower()
+            action = input("\n(a)dd device, (r)emove device, (e)dit device, (l)ist devices, (s)ize report, or (C)ontinue: ").strip().lower()
             
-            if action in ['c', 'continue']:
+            if action in ['c', 'continue', '']:
                 break
             elif action in ['a', 'add']:
                 device = add_device_interactive()
@@ -360,7 +360,7 @@ def manage_device_config():
                     print(f"❌ Rlog directory '{diroutbase}' does not exist.")
                     print("💡 Run the downloader first to create device folders.")
             else:
-                print("Invalid option! Please enter 'a', 'r', 'e', 'l', 's', or 'c'")
+                print("Invalid option! Please enter 'a', 'r', 'e', 'l', 's', or 'c' (or just press Enter to continue)")
     
     return devices
 
