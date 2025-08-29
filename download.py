@@ -334,7 +334,7 @@ def manage_device_config():
                         if new_username:
                             device['username'] = new_username
                         
-                        change_key = input("Change SSH key? (y/n): ").strip().lower()
+                        change_key = input("Change SSH key? (y/N): ").strip().lower()
                         if change_key in ['y', 'yes']:
                             new_key = select_ssh_key()
                             if new_key:
