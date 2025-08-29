@@ -353,7 +353,7 @@ def main():
         return
     
     print(f"📁 Local directory: {RLOGS_DIR}")
-    print(f"☁️  Remote destination: {uploader.remote_path}")
+    print(f"☁️ Remote destination: {uploader.remote_path}")
     print(f"📏 Max folder size: {MAX_FOLDER_SIZE_GB} GB")
     
     # Start upload
