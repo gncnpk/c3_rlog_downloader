@@ -104,7 +104,7 @@ python download_rlog_files.py
 ```
 
 On first run, you'll be guided through:
-1. **Device setup**: Add your device's IP address and choose a label
+1. **Device setup**: Add your device's IP address and choose a subfolder name (called "label" in the interface)
 2. **SSH key selection**: The script will find and help you select the right SSH key
 3. **Configuration saving**: Your settings are saved for future runs
 
@@ -119,12 +119,12 @@ The script provides an interactive menu to:
 Downloaded files are organized as:
 ```
 ~/Downloads/rlogs/
-├── device_label_1/
+├── device_subfolder_1/
 │   └── dongle_id/
 │       ├── dongle_id|route_name--segment--0--rlog.bz2
 │       ├── dongle_id|route_name--segment--1--rlog.bz2
 │       └── ...
-├── device_label_2/
+├── device_subfolder_2/
 │   └── dongle_id/
 │       └── ...
 ```
@@ -196,6 +196,8 @@ You can configure multiple Comma devices and the script will download from all o
   ]
 }
 ```
+
+**Note**: The "label" field specifies the subfolder name where each device's logs will be stored.
 
 ### Custom SSH Keys
 The script will automatically find SSH keys, but you can specify custom paths during device setup.
