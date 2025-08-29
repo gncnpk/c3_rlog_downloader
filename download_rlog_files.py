@@ -9,15 +9,18 @@ from pathlib import Path
 import io
 import stat
 import platform
+import json
+import tempfile
 
 # ========= MODIFY THESE If you want to =========
 diroutbase = os.path.expanduser("~/Downloads/rlogs")
-device_car_list = [
-    ("10.0.0.5", "comma"),  # (hostname/IP, subfolder name) - this is ip of your device
-]
+config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices_config.json")
+
+# Transfer method: "sftp" or "rsync"
+# rsync is generally faster and more efficient for large transfers
+transfer_method = "rsync"  # Change to "sftp" to use the original SFTP method
 
 # These -probably- don't change
-ssh_username = "comma"
 remote_data_dir = "/data/media/0/realdata" # pretty sure this wont change
 # ====
 
@@ -32,11 +35,311 @@ def is_on_home_wifi():
     except subprocess.CalledProcessError:
         return False
 
-def connect_ssh(host):
+def is_rsync_available():
+    """Check if rsync is available on the system."""
+    try:
+        subprocess.run(["rsync", "--version"], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def find_ssh_keys():
+    """Find available SSH keys in the user's .ssh directory."""
+    ssh_dir = os.path.expanduser("~/.ssh")
+    if not os.path.exists(ssh_dir):
+        return []
+    
+    # Common private key names
+    key_patterns = [
+        "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+        "*_rsa", "*_dsa", "*_ecdsa", "*_ed25519",
+        "*github*", "*gitlab*", "*bitbucket*",
+        "my_*_key", "*_key"
+    ]
+    
+    keys = []
+    for item in os.listdir(ssh_dir):
+        item_path = os.path.join(ssh_dir, item)
+        # Skip .pub files and directories
+        if item.endswith('.pub') or os.path.isdir(item_path):
+            continue
+        
+        # Check if it matches common key patterns or is a file without extension
+        is_key = False
+        for pattern in key_patterns:
+            if pattern.replace('*', '') in item.lower() or item == pattern.replace('*', ''):
+                is_key = True
+                break
+        
+        # Also include files that don't have extensions (common for SSH keys)
+        if not is_key and '.' not in item and os.path.isfile(item_path):
+            # Try to detect if it's likely an SSH key by reading first line
+            try:
+                with open(item_path, 'r') as f:
+                    first_line = f.readline().strip()
+                    if 'PRIVATE KEY' in first_line or first_line.startswith('-----'):
+                        is_key = True
+            except (UnicodeDecodeError, PermissionError):
+                # Binary file or no permission, might still be a key
+                is_key = True
+        
+        if is_key:
+            keys.append(item_path)
+    
+    return sorted(keys)
+
+def select_ssh_key():
+    """Prompt user to select or specify an SSH key."""
+    keys = find_ssh_keys()
+    
+    if not keys:
+        print("No SSH keys found in ~/.ssh directory!")
+        print("Please ensure you have SSH keys set up for your device.")
+        print("\nTo generate a new SSH key, run:")
+        print("  ssh-keygen -t ed25519 -C 'your-email@example.com'")
+        print("\nThen copy the public key to your device:")
+        print("  ssh-copy-id comma@your-device-ip")
+        
+        while True:
+            manual_key = input("\nEnter the path to your SSH private key (or 'q' to quit): ").strip()
+            if manual_key.lower() == 'q':
+                return None
+            
+            expanded_key = os.path.expanduser(manual_key)
+            if os.path.exists(expanded_key):
+                return expanded_key
+            else:
+                print(f"File not found: {expanded_key}")
+    
+    elif len(keys) == 1:
+        key_path = keys[0]
+        use_key = input(f"Found SSH key: {key_path}\nUse this key? (y/n): ").strip().lower()
+        if use_key in ['y', 'yes']:
+            return key_path
+        else:
+            manual_key = input("Enter the path to your SSH private key: ").strip()
+            return os.path.expanduser(manual_key) if manual_key else None
+    
+    else:
+        print("Multiple SSH keys found:")
+        for i, key in enumerate(keys, 1):
+            print(f"  {i}. {key}")
+        print(f"  {len(keys) + 1}. Enter custom path")
+        
+        while True:
+            try:
+                choice = input(f"\nSelect SSH key (1-{len(keys) + 1}): ").strip()
+                choice_num = int(choice)
+                
+                if 1 <= choice_num <= len(keys):
+                    return keys[choice_num - 1]
+                elif choice_num == len(keys) + 1:
+                    manual_key = input("Enter the path to your SSH private key: ").strip()
+                    return os.path.expanduser(manual_key) if manual_key else None
+                else:
+                    print(f"Please enter a number between 1 and {len(keys) + 1}")
+            except ValueError:
+                print("Please enter a valid number")
+
+def load_device_config():
+    """Load device configuration from JSON file."""
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            devices = config.get('devices', [])
+            
+            # Convert old format (tuples) to new format (dictionaries)
+            converted_devices = []
+            for device in devices:
+                if isinstance(device, (list, tuple)) and len(device) == 2:
+                    # Old format: (hostname, label)
+                    converted_devices.append({
+                        "hostname": device[0],
+                        "label": device[1],
+                        "username": "comma",  # Default username
+                        "ssh_key": os.path.expanduser("~/.ssh/id_rsa")  # Default key
+                    })
+                elif isinstance(device, dict):
+                    # New format: already a dictionary
+                    converted_devices.append(device)
+            
+            return converted_devices
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_device_config(devices):
+    """Save device configuration to JSON file."""
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(config_file), exist_ok=True)
+    
+    config = {
+        "devices": devices,
+        "last_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "transfer_method": transfer_method,
+        "remote_data_dir": remote_data_dir
+    }
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    print(f"Device configuration saved to: {config_file}")
+
+def add_device_interactive():
+    """Interactively add a new device to the configuration."""
+    print("\n--- Add New Device ---")
+    while True:
+        hostname = input("Enter device hostname or IP address: ").strip()
+        if hostname:
+            break
+        print("Hostname/IP cannot be empty!")
+    
+    while True:
+        label = input("Enter a subfolder name/label for this device [comma]: ").strip()
+        if not label:
+            label = "comma"  # Default subfolder name
+        break
+    
+    while True:
+        username = input("Enter SSH username for this device [comma]: ").strip()
+        if not username:
+            username = "comma"  # Default username
+        break
+    
+    print(f"\nSelecting SSH key for {hostname}...")
+    ssh_key = select_ssh_key()
+    if not ssh_key:
+        print("Cannot add device without SSH key!")
+        return None
+    
+    print(f"\nDevice will be saved as:")
+    print(f"  Host: {hostname}")
+    print(f"  Subfolder: {label}")
+    print(f"  Username: {username}")
+    print(f"  SSH Key: {ssh_key}")
+    print(f"  Logs will be stored in: ~/Downloads/rlogs/{label}/")
+    
+    return {
+        "hostname": hostname,
+        "label": label,
+        "username": username,
+        "ssh_key": ssh_key
+    }
+
+def manage_device_config():
+    """Manage device configuration - load existing or create new."""
+    devices = load_device_config()
+    
+    if not devices:
+        print("No device configuration found. Let's set up your devices.")
+        print("You can add multiple devices if you have more than one.")
+        
+        while True:
+            device = add_device_interactive()
+            if device:
+                devices.append(device)
+                print(f"Added device: {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+            
+            while True:
+                add_more = input("\nAdd another device? (y/n): ").strip().lower()
+                if add_more in ['y', 'yes', 'n', 'no']:
+                    break
+                print("Please enter 'y' or 'n'")
+            
+            if add_more in ['n', 'no']:
+                break
+        
+        save_device_config(devices)
+    else:
+        print(f"Loaded {len(devices)} device(s) from configuration:")
+        for i, device in enumerate(devices, 1):
+            print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+        
+        while True:
+            action = input("\n(a)dd device, (r)emove device, (e)dit device, (l)ist devices, or (c)ontinue: ").strip().lower()
+            
+            if action in ['c', 'continue']:
+                break
+            elif action in ['a', 'add']:
+                device = add_device_interactive()
+                if device:
+                    devices.append(device)
+                    print(f"Added device: {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+                    save_device_config(devices)
+            elif action in ['r', 'remove']:
+                if not devices:
+                    print("No devices to remove!")
+                    continue
+                
+                print("Select device to remove:")
+                for i, device in enumerate(devices, 1):
+                    print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+                
+                try:
+                    choice = int(input("Enter device number: ")) - 1
+                    if 0 <= choice < len(devices):
+                        removed = devices.pop(choice)
+                        print(f"Removed device: {removed['hostname']} (subfolder: {removed['label']})")
+                        save_device_config(devices)
+                    else:
+                        print("Invalid device number!")
+                except ValueError:
+                    print("Please enter a valid number!")
+            elif action in ['e', 'edit']:
+                if not devices:
+                    print("No devices to edit!")
+                    continue
+                
+                print("Select device to edit:")
+                for i, device in enumerate(devices, 1):
+                    print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+                
+                try:
+                    choice = int(input("Enter device number: ")) - 1
+                    if 0 <= choice < len(devices):
+                        device = devices[choice]
+                        print(f"\nEditing device: {device['hostname']} (subfolder: {device['label']})")
+                        
+                        # Edit each field
+                        new_hostname = input(f"Hostname [{device['hostname']}]: ").strip()
+                        if new_hostname:
+                            device['hostname'] = new_hostname
+                        
+                        new_label = input(f"Subfolder name [{device['label']}]: ").strip()
+                        if new_label:
+                            device['label'] = new_label
+                        
+                        new_username = input(f"Username [{device['username']}]: ").strip()
+                        if new_username:
+                            device['username'] = new_username
+                        
+                        change_key = input("Change SSH key? (y/n): ").strip().lower()
+                        if change_key in ['y', 'yes']:
+                            new_key = select_ssh_key()
+                            if new_key:
+                                device['ssh_key'] = new_key
+                        
+                        save_device_config(devices)
+                        print("Device updated successfully!")
+                    else:
+                        print("Invalid device number!")
+                except ValueError:
+                    print("Please enter a valid number!")
+            elif action in ['l', 'list']:
+                print("Current devices:")
+                for i, device in enumerate(devices, 1):
+                    print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
+                    print(f"      SSH Key: {device['ssh_key']}")
+                    print(f"      Logs stored in: ~/Downloads/rlogs/{device['label']}/")
+            else:
+                print("Invalid option! Please enter 'a', 'r', 'e', 'l', or 'c'")
+    
+    return devices
+
+def connect_ssh(host, username, ssh_key):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     # use the pre-loaded key from the private_key_str
-    client.connect(hostname=host, username=ssh_username, allow_agent=True, look_for_keys=True)
+    client.connect(hostname=host, username=username, allow_agent=True, look_for_keys=True, key_filename=ssh_key)
     #client.connect(hostname=host, username=ssh_username, pkey=key)
     return client
 
@@ -44,10 +347,202 @@ def run_ssh_command(ssh, cmd):
     stdin, stdout, stderr = ssh.exec_command(cmd)
     return stdout.read().decode().strip(), stderr.read().decode().strip()
 
-def fetch_rlogs(device_host, label):
+def fetch_rlogs_rsync(device):
+    """Fetch rlogs using rsync (faster and more efficient than SFTP)."""
+    device_host = device['hostname']
+    label = device['label']
+    username = device['username']
+    ssh_key = device['ssh_key']
+    
+    print(f"{device_host} ({label}): Connecting via SSH to check status...")
+    
+    # Check if rsync is available
+    if not is_rsync_available():
+        print(f"{device_host} ({label}): rsync not available, falling back to SFTP")
+        return fetch_rlogs_sftp(device)
+    
+    try:
+        ssh = connect_ssh(device_host, username, ssh_key)
+    except Exception as e:
+        print(f"{device_host} ({label}): Connection failed: {e}")
+        return
+
+    dongle_id, _ = run_ssh_command(ssh, "cat /data/params/d/DongleId")
+    is_offroad, _ = run_ssh_command(ssh, "cat /data/params/d/IsOffroad")
+
+    if is_offroad.strip() != "1":
+        print(f"{device_host} ({label}): Skipping, device is onroad")
+        ssh.close()
+        return
+
+    if not is_on_home_wifi():
+        print(f"{device_host} ({label}): Not on home WiFi")
+        ssh.close()
+        return
+
+    output_dir = Path(diroutbase) / label / dongle_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get list of remote files first to check what we already have
+    print(f"{device_host} ({label}): Getting list of remote files...")
+    remote_files_cmd = f"find {remote_data_dir} -name '*rlog*' -type f"
+    remote_files_output, _ = run_ssh_command(ssh, remote_files_cmd)
+    
+    ssh.close()
+    
+    # Parse remote files and check if we already have them (renamed)
+    remote_files = remote_files_output.strip().split('\n') if remote_files_output.strip() else []
+    existing_files = set()
+    
+    # Build set of existing renamed files
+    for file_path in output_dir.glob('*rlog*'):
+        existing_files.add(file_path.name)
+    
+    # Check which files we actually need to download
+    files_needed = []
+    
+    print(f"{device_host} ({label}): Analyzing which files we need...")
+    print(f"Sample existing files: {list(existing_files)[:3]}")
+    
+    for remote_file in remote_files:
+        if not remote_file.strip():
+            continue
+        
+        # Convert remote path to what the renamed file would be
+        relative_path = remote_file.replace(remote_data_dir + "/", "")
+        route_parts = relative_path.split("/")
+        filename = route_parts[-1]
+        
+        if len(route_parts) > 1:
+            route = "|".join(route_parts[:-1])
+            expected_filename = f"{dongle_id}|{route}--{filename}"
+        else:
+            expected_filename = f"{dongle_id}--{filename}"
+        
+        if expected_filename not in existing_files:
+            files_needed.append(remote_file)
+            
+        # Debug: show first few comparisons
+        if len(files_needed) <= 3:
+            status = 'MISSING' if expected_filename not in existing_files else 'EXISTS'
+            print(f"Remote: {relative_path} -> Expected: {expected_filename} -> {status}")
+    
+    if not files_needed:
+        print(f"{device_host} ({label}): All {len(remote_files)} files already exist, skipping rsync")
+        return
+    
+    print(f"{device_host} ({label}): Need to download {len(files_needed)} files out of {len(remote_files)} total")
+    
+    # Instead of trying to exclude files, let's download only the files we need
+    # We'll do this by downloading each needed file individually
+    print(f"{device_host} ({label}): Downloading files individually to avoid duplicates...")
+    
+    files_downloaded = 0
+    for needed_file in files_needed:
+        relative_path = needed_file.replace(remote_data_dir + "/", "")
+        rsync_source = f"{username}@{device_host}:{needed_file}"
+        
+        # Create the directory structure for this file
+        local_dir_path = output_dir / Path(relative_path).parent
+        local_dir_path.mkdir(parents=True, exist_ok=True)
+        
+        local_file_path = output_dir / relative_path
+        
+        # Individual rsync command for this file
+        rsync_cmd = [
+            "rsync",
+            "-avz",
+            "--progress",
+            "-e", f"ssh -i {ssh_key} -o StrictHostKeyChecking=no",
+            rsync_source,
+            str(local_file_path)
+        ]
+        
+        try:
+            print(f"Downloading {relative_path}...")
+            subprocess.run(rsync_cmd, check=True)
+            files_downloaded += 1
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to download {relative_path}: {e}")
+    
+    print(f"{device_host} ({label}): Downloaded {files_downloaded} files successfully")    # Rename files to match the original naming convention (dongle_id|route--filename)
+    print(f"{device_host} ({label}): Renaming files to match original convention...")
+    rename_rsync_files(output_dir, dongle_id, remote_data_dir)
+
+def rename_rsync_files(output_dir, dongle_id, remote_data_dir):
+    """Rename rsync'd files to match the original SFTP naming convention."""
+    
+    # First, build a map of existing renamed files to avoid duplicates
+    existing_renamed = {}
+    for file_path in output_dir.glob('*rlog*'):
+        if not file_path.is_file():
+            continue
+        # If filename already contains dongle_id, it's already renamed
+        if file_path.name.startswith(dongle_id):
+            existing_renamed[file_path.name] = file_path
+    
+    for root, dirs, files in os.walk(output_dir):
+        for file in files:
+            if "rlog" in file:
+                current_path = Path(root) / file
+                # Get the relative path from the output_dir
+                rel_path = current_path.relative_to(output_dir)
+                
+                # Skip if this file is already in renamed format
+                if current_path.name.startswith(dongle_id):
+                    continue
+                
+                # Convert path to route format (replace / with |)
+                route_parts = list(rel_path.parts[:-1])  # All parts except filename
+                if route_parts:
+                    route = "|".join(route_parts)
+                    new_filename = f"{dongle_id}|{route}--{file}"
+                else:
+                    new_filename = f"{dongle_id}--{file}"
+                
+                new_path = output_dir / new_filename
+                
+                # Check if target file already exists (prevents duplicates)
+                if new_filename in existing_renamed:
+                    print(f"Target file already exists, removing duplicate: {rel_path}")
+                    try:
+                        current_path.unlink()  # Remove the duplicate
+                    except Exception as e:
+                        print(f"Failed to remove duplicate {current_path}: {e}")
+                elif new_path.exists():
+                    print(f"Target file exists on disk, removing duplicate: {rel_path}")
+                    try:
+                        current_path.unlink()  # Remove the duplicate
+                    except Exception as e:
+                        print(f"Failed to remove duplicate {current_path}: {e}")
+                else:
+                    try:
+                        current_path.rename(new_path)
+                        existing_renamed[new_filename] = new_path  # Track it
+                        print(f"Renamed: {rel_path} → {new_filename}")
+                    except Exception as e:
+                        print(f"Failed to rename {current_path}: {e}")
+    
+    # Clean up empty directories
+    for root, dirs, files in os.walk(output_dir, topdown=False):
+        for dir_name in dirs:
+            dir_path = Path(root) / dir_name
+            try:
+                if not any(dir_path.iterdir()):  # Directory is empty
+                    dir_path.rmdir()
+            except OSError:
+                pass  # Directory not empty or other error
+
+def fetch_rlogs_sftp(device):
+    """Fetch rlogs using SFTP (original method)."""
+    device_host = device['hostname']
+    label = device['label']
+    username = device['username']
+    ssh_key = device['ssh_key']
+    
     print(f"{device_host} ({label}): Connecting...")
     try:
-        ssh = connect_ssh(device_host)
+        ssh = connect_ssh(device_host, username, ssh_key)
     except Exception as e:
         print(f"{device_host} ({label}): Connection failed: {e}")
         return
@@ -113,6 +608,13 @@ def fetch_rlogs(device_host, label):
     sftp.close()
     ssh.close()
 
+def fetch_rlogs(device):
+    """Fetch rlogs using the configured transfer method."""
+    if transfer_method.lower() == "rsync":
+        fetch_rlogs_rsync(device)
+    else:
+        fetch_rlogs_sftp(device)
+
 def compress_unzipped_rlogs(base_dir):
     import gzip
     import shutil
@@ -155,8 +657,21 @@ def compress_unzipped_rlogs(base_dir):
                             os.remove(compressed_path)
 
 def main():
-    for host, label in device_car_list:
-        fetch_rlogs(host, label)
+    print(f"Using transfer method: {transfer_method}")
+    if transfer_method.lower() == "rsync" and not is_rsync_available():
+        print("Warning: rsync not found, will fall back to SFTP if needed")
+    
+    # Load or create device configuration
+    device_list = manage_device_config()
+    
+    if not device_list:
+        print("No devices configured. Exiting.")
+        return
+    
+    print(f"\nStarting download for {len(device_list)} device(s)...")
+    for device in device_list:
+        print(f"Processing {device['hostname']} (subfolder: {device['label']}) with user {device['username']}")
+        fetch_rlogs(device)
         time.sleep(5)  # Optional wait between devices
 
     print("Compressing unzipped rlogs...")
