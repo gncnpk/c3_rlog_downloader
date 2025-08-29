@@ -375,7 +375,7 @@ def connect_ssh(host, username, ssh_key):
             
             # Try different key types for better Windows compatibility
             key_loaded = False
-            for key_class in [paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey]:
+            for key_class in [paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey]:
                 try:
                     if 'passphrase' in ssh_key or 'password' in ssh_key:
                         # Key might be password protected
