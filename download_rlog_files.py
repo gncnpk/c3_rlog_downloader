@@ -37,7 +37,6 @@ transfer_method = "rsync"  # Change to "sftp" to use the original SFTP method
 
 # Rsync optimization settings (only used when transfer_method = "rsync")
 rsync_compress_level = 1  # 1-9, lower = faster but larger, higher = slower but smaller
-rsync_parallel_transfers = True  # Enable experimental parallel transfers (may not work on all systems)
 rsync_bandwidth_limit = 0  # KB/s, 0 = no limit (use for slower connections)
 rsync_whole_file = True  # Use whole-file transfers (faster for initial sync, slower for updates)
 
