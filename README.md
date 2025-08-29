@@ -18,6 +18,7 @@ This comprehensive toolkit connects to your Comma 3/3X device to download drivin
 - **Device management**: Store and manage multiple device configurations
 - **Windows compatibility**: Handles Windows path limitations and file naming requirements
 - **Progress tracking**: Shows download progress and file sizes
+- **Automatic size reporting**: Reports device folder sizes and compression statistics after each run
 
 ### ☁️ **Google Drive Upload** (`upload_to_google_drive_rclone.py`)
 - **RClone-powered uploads**: Fast, reliable transfers using native rclone binary
@@ -207,6 +208,22 @@ On first run, you'll be guided through:
 2. **SSH key selection**: The script will find and help you select the right SSH key
 3. **Configuration saving**: Your settings are saved for future runs
 
+### Interactive Device Management
+
+After devices are configured, the script provides an interactive menu with these options:
+- **(a)dd device**: Add a new Comma device
+- **(r)emove device**: Remove an existing device from configuration
+- **(e)dit device**: Modify device settings (hostname, username, SSH key, etc.)
+- **(l)ist devices**: Show all configured devices with details
+- **(s)ize report**: Generate detailed storage usage report for all devices
+- **(c)ontinue**: Proceed with downloading rlogs
+
+The **size report** option shows:
+- Total storage used per device
+- File counts by compression type (zstd, gzip, uncompressed)
+- Compression efficiency statistics
+- Potential storage savings from compression
+
 ### Upload RLogs to Google Drive
 
 After downloading rlogs locally:
@@ -243,6 +260,7 @@ The rlog downloader provides an interactive menu to:
 - **Edit existing device settings**
 - **Remove devices**
 - **List all configured devices**
+- **Generate size reports** (view device storage usage and compression statistics)
 
 ### Transfer Methods (Rlog Downloader)
 You can choose between:

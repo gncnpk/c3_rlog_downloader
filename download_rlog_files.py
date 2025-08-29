@@ -277,7 +277,7 @@ def manage_device_config():
             print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
         
         while True:
-            action = input("\n(a)dd device, (r)emove device, (e)dit device, (l)ist devices, or (c)ontinue: ").strip().lower()
+            action = input("\n(a)dd device, (r)emove device, (e)dit device, (l)ist devices, (s)ize report, or (c)ontinue: ").strip().lower()
             
             if action in ['c', 'continue']:
                 break
@@ -352,8 +352,15 @@ def manage_device_config():
                     print(f"  {i}. {device['hostname']} (subfolder: {device['label']}) - User: {device['username']}")
                     print(f"      SSH Key: {device['ssh_key']}")
                     print(f"      Logs stored in: ~/Downloads/rlogs/{device['label']}/")
+            elif action in ['s', 'size']:
+                print("\nGenerating device size report...")
+                if os.path.exists(diroutbase):
+                    report_device_sizes_after_compression(diroutbase)
+                else:
+                    print(f"❌ Rlog directory '{diroutbase}' does not exist.")
+                    print("💡 Run the downloader first to create device folders.")
             else:
-                print("Invalid option! Please enter 'a', 'r', 'e', 'l', or 'c'")
+                print("Invalid option! Please enter 'a', 'r', 'e', 'l', 's', or 'c'")
     
     return devices
 
@@ -969,9 +976,35 @@ def fetch_rlogs(device):
     else:
         fetch_rlogs_sftp(device)
 
+def format_size(size_bytes):
+    """Format file size in human-readable format."""
+    if size_bytes == 0:
+        return "0 B"
+    size_names = ["B", "KB", "MB", "GB", "TB"]
+    size_index = 0
+    size = float(size_bytes)
+    while size >= 1024.0 and size_index < len(size_names) - 1:
+        size /= 1024.0
+        size_index += 1
+    return f"{size:.2f} {size_names[size_index]}"
+
+def get_folder_size(folder_path):
+    """Calculate total size of all files in a folder and its subfolders."""
+    total_size = 0
+    try:
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if os.path.exists(file_path):
+                    total_size += os.path.getsize(file_path)
+    except Exception as e:
+        print(f"Error calculating folder size for {folder_path}: {e}")
+    return total_size
+
 def compress_unzipped_rlogs(base_dir):
     import gzip
     import shutil
+    from collections import defaultdict
     
     # Check if zstd is available first (best compression)
     zstd_available = False
@@ -982,41 +1015,251 @@ def compress_unzipped_rlogs(base_dir):
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("zstd not found, using built-in gzip compression...")
     
+    # Track compression statistics per device
+    device_stats = defaultdict(lambda: {
+        'files_compressed': 0,
+        'original_size': 0,
+        'compressed_size': 0,
+        'compression_errors': 0
+    })
+    
+    # First pass: collect all uncompressed rlog files and their sizes
+    files_to_compress = []
     for root, dirs, files in os.walk(base_dir):
         for file in files:
             if file.endswith("rlog"):
                 full_path = os.path.join(root, file)
-                
-                if zstd_available:
-                    # Use zstd if available
-                    print(f"Compressing with zstd: {full_path}")
-                    try:
-                        # On Windows, handle path quoting for subprocess
-                        if platform.system() == "Windows":
-                            subprocess.run(["zstd", "--rm", "-f", str(full_path)], check=True, shell=True)
-                        else:
-                            subprocess.run(["zstd", "--rm", "-f", full_path], check=True)
-                    except subprocess.CalledProcessError as e:
-                        print(f"Failed to compress {full_path}: {e}")
+                try:
+                    file_size = os.path.getsize(full_path)
+                    # Extract device info from path structure
+                    rel_path = os.path.relpath(root, base_dir)
+                    device_label = rel_path.split(os.sep)[0] if os.sep in rel_path else rel_path
+                    files_to_compress.append((full_path, file_size, device_label))
+                except Exception as e:
+                    print(f"Error getting size for {full_path}: {e}")
+    
+    if not files_to_compress:
+        print("No uncompressed rlog files found.")
+        # Still report current device sizes
+        report_device_sizes_after_compression(base_dir)
+        return
+    
+    total_files = len(files_to_compress)
+    print(f"Found {total_files} uncompressed rlog files to process...")
+    
+    # Compress files and track statistics
+    for i, (full_path, original_size, device_label) in enumerate(files_to_compress, 1):
+        print(f"[{i}/{total_files}] Processing: {os.path.basename(full_path)} ({format_size(original_size)})")
+        
+        device_stats[device_label]['original_size'] += original_size
+        
+        success = False
+        compressed_size = 0
+        
+        if zstd_available:
+            # Use zstd if available
+            try:
+                # On Windows, handle path quoting for subprocess
+                if platform.system() == "Windows":
+                    result = subprocess.run(["zstd", "--rm", "-f", str(full_path)], 
+                                          check=True, shell=True, capture_output=True)
                 else:
-                    # Use Python's built-in gzip compression
-                    compressed_path = full_path + ".gz"
-                    print(f"Compressing with gzip: {full_path} → {compressed_path}")
+                    result = subprocess.run(["zstd", "--rm", "-f", full_path], 
+                                          check=True, capture_output=True)
+                
+                # Check for compressed file
+                compressed_path = full_path + ".zst"
+                if os.path.exists(compressed_path):
+                    compressed_size = os.path.getsize(compressed_path)
+                    success = True
+                    print(f"  ✓ Compressed with zstd: {format_size(original_size)} → {format_size(compressed_size)} ({compressed_size/original_size*100:.1f}%)")
+                
+            except subprocess.CalledProcessError as e:
+                print(f"  ✗ Failed to compress with zstd: {e}")
+                device_stats[device_label]['compression_errors'] += 1
+        else:
+            # Use Python's built-in gzip compression
+            compressed_path = full_path + ".gz"
+            try:
+                with open(full_path, 'rb') as f_in:
+                    with gzip.open(compressed_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                
+                if os.path.exists(compressed_path):
+                    compressed_size = os.path.getsize(compressed_path)
+                    success = True
+                    # Remove original file after successful compression
+                    os.remove(full_path)
+                    print(f"  ✓ Compressed with gzip: {format_size(original_size)} → {format_size(compressed_size)} ({compressed_size/original_size*100:.1f}%)")
+                
+            except Exception as e:
+                print(f"  ✗ Failed to compress with gzip: {e}")
+                device_stats[device_label]['compression_errors'] += 1
+                # Remove incomplete compressed file if it exists
+                if os.path.exists(compressed_path):
                     try:
-                        with open(full_path, 'rb') as f_in:
-                            with gzip.open(compressed_path, 'wb') as f_out:
-                                shutil.copyfileobj(f_in, f_out)
-                        # Remove original file after successful compression
-                        os.remove(full_path)
-                    except Exception as e:
-                        print(f"Failed to compress {full_path}: {e}")
-                        # Remove incomplete compressed file if it exists
-                        if os.path.exists(compressed_path):
-                            os.remove(compressed_path)
+                        os.remove(compressed_path)
+                    except:
+                        pass
+        
+        if success:
+            device_stats[device_label]['files_compressed'] += 1
+            device_stats[device_label]['compressed_size'] += compressed_size
+    
+    # Print compression summary
+    print("\n" + "="*60)
+    print("COMPRESSION SUMMARY")
+    print("="*60)
+    
+    total_original = 0
+    total_compressed = 0
+    total_files_compressed = 0
+    total_errors = 0
+    
+    for device_label, stats in device_stats.items():
+        if stats['files_compressed'] > 0 or stats['compression_errors'] > 0:
+            print(f"\nDevice: {device_label}")
+            print(f"  Files compressed: {stats['files_compressed']}")
+            if stats['compression_errors'] > 0:
+                print(f"  Compression errors: {stats['compression_errors']}")
+            if stats['files_compressed'] > 0:
+                print(f"  Original size: {format_size(stats['original_size'])}")
+                print(f"  Compressed size: {format_size(stats['compressed_size'])}")
+                if stats['original_size'] > 0:
+                    ratio = stats['compressed_size'] / stats['original_size'] * 100
+                    savings = stats['original_size'] - stats['compressed_size']
+                    print(f"  Compression ratio: {ratio:.1f}% (saved {format_size(savings)})")
+            
+            total_original += stats['original_size']
+            total_compressed += stats['compressed_size']
+            total_files_compressed += stats['files_compressed']
+            total_errors += stats['compression_errors']
+    
+    if total_files_compressed > 0:
+        print(f"\nOVERALL COMPRESSION:")
+        print(f"  Total files compressed: {total_files_compressed}")
+        if total_errors > 0:
+            print(f"  Total errors: {total_errors}")
+        print(f"  Total original size: {format_size(total_original)}")
+        print(f"  Total compressed size: {format_size(total_compressed)}")
+        if total_original > 0:
+            overall_ratio = total_compressed / total_original * 100
+            total_savings = total_original - total_compressed
+            print(f"  Overall compression ratio: {overall_ratio:.1f}% (saved {format_size(total_savings)})")
+    
+    # Report final device sizes after compression
+    print("\n" + "="*60)
+    report_device_sizes_after_compression(base_dir)
+
+def report_device_sizes_after_compression(base_dir):
+    """Report the total size of each device folder after compression."""
+    print("DEVICE FOLDER SIZES AFTER COMPRESSION")
+    print("="*60)
+    
+    if not os.path.exists(base_dir):
+        print(f"Base directory {base_dir} does not exist.")
+        return
+    
+    device_folders = []
+    total_all_devices = 0
+    
+    try:
+        # Get all device folders (first level subdirectories)
+        for item in os.listdir(base_dir):
+            item_path = os.path.join(base_dir, item)
+            if os.path.isdir(item_path):
+                folder_size = get_folder_size(item_path)
+                device_folders.append((item, folder_size))
+                total_all_devices += folder_size
+    except Exception as e:
+        print(f"Error reading device folders: {e}")
+        return
+    
+    if not device_folders:
+        print("No device folders found.")
+        return
+    
+    # Sort devices by size (largest first)
+    device_folders.sort(key=lambda x: x[1], reverse=True)
+    
+    print(f"Found {len(device_folders)} device folder(s):\n")
+    
+    for device_name, size in device_folders:
+        print(f"  {device_name:<20} {format_size(size):>12}")
+        
+        # Show breakdown by dongle_id if there are subfolders
+        device_path = os.path.join(base_dir, device_name)
+        try:
+            subfolders = []
+            for subfolder in os.listdir(device_path):
+                subfolder_path = os.path.join(device_path, subfolder)
+                if os.path.isdir(subfolder_path):
+                    subfolder_size = get_folder_size(subfolder_path)
+                    subfolders.append((subfolder, subfolder_size))
+            
+            if len(subfolders) > 1:  # Only show breakdown if multiple dongle IDs
+                subfolders.sort(key=lambda x: x[1], reverse=True)
+                for subfolder_name, subfolder_size in subfolders:
+                    print(f"    └─ {subfolder_name:<16} {format_size(subfolder_size):>12}")
+        except Exception as e:
+            print(f"    └─ Error reading subfolders: {e}")
+    
+    print(f"\nTOTAL SIZE (all devices): {format_size(total_all_devices)}")
+    
+    # Show file count statistics
+    print(f"\nFILE STATISTICS:")
+    for device_name, _ in device_folders:
+        device_path = os.path.join(base_dir, device_name)
+        file_counts = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
+        
+        try:
+            for root, dirs, files in os.walk(device_path):
+                for file in files:
+                    if file.endswith('.rlog.zst'):
+                        file_counts['rlog.zst'] += 1
+                    elif file.endswith('.rlog.gz'):
+                        file_counts['rlog.gz'] += 1
+                    elif file.endswith('.rlog.bz2'):
+                        file_counts['rlog.bz2'] += 1
+                    elif file.endswith('.rlog'):
+                        file_counts['rlog'] += 1
+                    else:
+                        file_counts['other'] += 1
+            
+            total_files = sum(file_counts.values())
+            if total_files > 0:
+                print(f"  {device_name:<20} {total_files:>4} files ", end="")
+                details = []
+                if file_counts['rlog.zst'] > 0:
+                    details.append(f"{file_counts['rlog.zst']} zst")
+                if file_counts['rlog.gz'] > 0:
+                    details.append(f"{file_counts['rlog.gz']} gz")
+                if file_counts['rlog.bz2'] > 0:
+                    details.append(f"{file_counts['rlog.bz2']} bz2")
+                if file_counts['rlog'] > 0:
+                    details.append(f"{file_counts['rlog']} uncompressed")
+                if file_counts['other'] > 0:
+                    details.append(f"{file_counts['other']} other")
+                
+                if details:
+                    print(f"({', '.join(details)})")
+                else:
+                    print()
+        except Exception as e:
+            print(f"  {device_name:<20} Error counting files: {e}")
+    
+    print("="*60)
 
 def main():
     print(f"Cross-platform rlog downloader (Windows/macOS/Linux)")
     print(f"Using transfer method: {transfer_method}")
+    print()
+    print("💡 Features:")
+    print("   • Download rlogs from your Comma 3/3X device")
+    print("   • Automatic compression (zstd/gzip)")
+    print("   • Device size reporting and compression statistics")
+    print("   • Multi-device management")
+    print()
     
     if transfer_method.lower() == "rsync":
         print(f"Rsync optimizations enabled:")
@@ -1044,7 +1287,7 @@ def main():
         fetch_rlogs(device)
         time.sleep(5)  # Optional wait between devices
 
-    print("Compressing unzipped rlogs...")
+    print("Compressing unzipped rlogs and generating size report...")
     compress_unzipped_rlogs(diroutbase)
     print("Done.")
 
