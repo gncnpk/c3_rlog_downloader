@@ -1152,9 +1152,9 @@ def compress_unzipped_rlogs(base_dir):
     report_device_sizes_after_compression(base_dir)
 
 def report_device_sizes_after_compression(base_dir):
-    """Report the total size of each device folder after compression."""
+    """Report the total size of each device folder after compression, with detailed dongle ID breakdown."""
     print("DEVICE FOLDER SIZES AFTER COMPRESSION")
-    print("="*60)
+    print("="*70)
     
     if not os.path.exists(base_dir):
         print(f"Base directory {base_dir} does not exist.")
@@ -1184,71 +1184,173 @@ def report_device_sizes_after_compression(base_dir):
     
     print(f"Found {len(device_folders)} device folder(s):\n")
     
-    for device_name, size in device_folders:
-        print(f"  {device_name:<20} {format_size(size):>12}")
+    # Detailed breakdown by device and dongle ID
+    for device_name, total_device_size in device_folders:
+        print(f"📱 DEVICE: {device_name}")
+        print(f"   Total Size: {format_size(total_device_size)}")
         
-        # Show breakdown by dongle_id if there are subfolders
         device_path = os.path.join(base_dir, device_name)
+        
         try:
-            subfolders = []
+            # Get all dongle ID subfolders
+            dongle_folders = []
             for subfolder in os.listdir(device_path):
                 subfolder_path = os.path.join(device_path, subfolder)
                 if os.path.isdir(subfolder_path):
                     subfolder_size = get_folder_size(subfolder_path)
-                    subfolders.append((subfolder, subfolder_size))
+                    dongle_folders.append((subfolder, subfolder_size, subfolder_path))
             
-            if len(subfolders) > 1:  # Only show breakdown if multiple dongle IDs
-                subfolders.sort(key=lambda x: x[1], reverse=True)
-                for subfolder_name, subfolder_size in subfolders:
-                    print(f"    └─ {subfolder_name:<16} {format_size(subfolder_size):>12}")
+            if dongle_folders:
+                # Sort dongle folders by size (largest first)
+                dongle_folders.sort(key=lambda x: x[1], reverse=True)
+                
+                print(f"   Dongle IDs ({len(dongle_folders)}):")
+                for dongle_id, dongle_size, dongle_path in dongle_folders:
+                    print(f"     🔸 {dongle_id}")
+                    print(f"        Size: {format_size(dongle_size)}")
+                    
+                    # Get file statistics for this dongle ID
+                    file_counts = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
+                    file_sizes = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
+                    
+                    try:
+                        for root, dirs, files in os.walk(dongle_path):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                try:
+                                    file_size = os.path.getsize(file_path)
+                                except:
+                                    file_size = 0
+                                
+                                if file.endswith('.rlog.zst'):
+                                    file_counts['rlog.zst'] += 1
+                                    file_sizes['rlog.zst'] += file_size
+                                elif file.endswith('.rlog.gz'):
+                                    file_counts['rlog.gz'] += 1
+                                    file_sizes['rlog.gz'] += file_size
+                                elif file.endswith('.rlog.bz2'):
+                                    file_counts['rlog.bz2'] += 1
+                                    file_sizes['rlog.bz2'] += file_size
+                                elif file.endswith('.rlog'):
+                                    file_counts['rlog'] += 1
+                                    file_sizes['rlog'] += file_size
+                                else:
+                                    file_counts['other'] += 1
+                                    file_sizes['other'] += file_size
+                        
+                        total_files = sum(file_counts.values())
+                        if total_files > 0:
+                            print(f"        Files: {total_files:,} total")
+                            
+                            # Show detailed compression breakdown
+                            compression_details = []
+                            if file_counts['rlog.zst'] > 0:
+                                compression_details.append(f"🟢 {file_counts['rlog.zst']:,} zstd ({format_size(file_sizes['rlog.zst'])})")
+                            if file_counts['rlog.gz'] > 0:
+                                compression_details.append(f"🔵 {file_counts['rlog.gz']:,} gzip ({format_size(file_sizes['rlog.gz'])})")
+                            if file_counts['rlog.bz2'] > 0:
+                                compression_details.append(f"🟡 {file_counts['rlog.bz2']:,} bzip2 ({format_size(file_sizes['rlog.bz2'])})")
+                            if file_counts['rlog'] > 0:
+                                compression_details.append(f"🔴 {file_counts['rlog']:,} uncompressed ({format_size(file_sizes['rlog'])})")
+                            if file_counts['other'] > 0:
+                                compression_details.append(f"⚪ {file_counts['other']:,} other ({format_size(file_sizes['other'])})")
+                            
+                            if compression_details:
+                                for detail in compression_details:
+                                    print(f"          • {detail}")
+                            
+                            # Show compression efficiency for this dongle
+                            total_compressed = file_counts['rlog.zst'] + file_counts['rlog.gz'] + file_counts['rlog.bz2']
+                            if total_files > 0:
+                                compression_percentage = (total_compressed / total_files) * 100
+                                print(f"        Compression: {compression_percentage:.1f}% of files compressed")
+                                
+                                if file_counts['rlog'] > 0:
+                                    print(f"        ⚠️  {file_counts['rlog']:,} files still uncompressed")
+                        else:
+                            print(f"        Files: No rlog files found")
+                            
+                    except Exception as e:
+                        print(f"        Error analyzing files: {e}")
+            else:
+                print(f"   No dongle ID folders found")
+                
         except Exception as e:
-            print(f"    └─ Error reading subfolders: {e}")
+            print(f"   Error reading dongle folders: {e}")
+        
+        print()  # Empty line between devices
     
-    print(f"\nTOTAL SIZE (all devices): {format_size(total_all_devices)}")
+    # Overall summary
+    print("="*70)
+    print("📊 SUMMARY")
+    print("-"*30)
+    print(f"Total Devices: {len(device_folders)}")
+    print(f"Total Size: {format_size(total_all_devices)}")
     
-    # Show file count statistics
-    print(f"\nFILE STATISTICS:")
+    # Calculate overall statistics
+    total_files = 0
+    total_compressed_files = 0
+    total_uncompressed_files = 0
+    total_uncompressed_size = 0
+    total_dongle_ids = 0
+    
     for device_name, _ in device_folders:
         device_path = os.path.join(base_dir, device_name)
-        file_counts = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
-        
         try:
-            for root, dirs, files in os.walk(device_path):
-                for file in files:
-                    if file.endswith('.rlog.zst'):
-                        file_counts['rlog.zst'] += 1
-                    elif file.endswith('.rlog.gz'):
-                        file_counts['rlog.gz'] += 1
-                    elif file.endswith('.rlog.bz2'):
-                        file_counts['rlog.bz2'] += 1
-                    elif file.endswith('.rlog'):
-                        file_counts['rlog'] += 1
-                    else:
-                        file_counts['other'] += 1
-            
-            total_files = sum(file_counts.values())
-            if total_files > 0:
-                print(f"  {device_name:<20} {total_files:>4} files ", end="")
-                details = []
-                if file_counts['rlog.zst'] > 0:
-                    details.append(f"{file_counts['rlog.zst']} zst")
-                if file_counts['rlog.gz'] > 0:
-                    details.append(f"{file_counts['rlog.gz']} gz")
-                if file_counts['rlog.bz2'] > 0:
-                    details.append(f"{file_counts['rlog.bz2']} bz2")
-                if file_counts['rlog'] > 0:
-                    details.append(f"{file_counts['rlog']} uncompressed")
-                if file_counts['other'] > 0:
-                    details.append(f"{file_counts['other']} other")
-                
-                if details:
-                    print(f"({', '.join(details)})")
-                else:
-                    print()
-        except Exception as e:
-            print(f"  {device_name:<20} Error counting files: {e}")
+            for subfolder in os.listdir(device_path):
+                subfolder_path = os.path.join(device_path, subfolder)
+                if os.path.isdir(subfolder_path):
+                    total_dongle_ids += 1
+                    
+                    file_counts = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
+                    file_sizes = {'rlog': 0, 'rlog.gz': 0, 'rlog.zst': 0, 'rlog.bz2': 0, 'other': 0}
+                    
+                    for root, dirs, files in os.walk(subfolder_path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            try:
+                                file_size = os.path.getsize(file_path)
+                            except:
+                                file_size = 0
+                            
+                            if file.endswith('.rlog.zst'):
+                                file_counts['rlog.zst'] += 1
+                                file_sizes['rlog.zst'] += file_size
+                            elif file.endswith('.rlog.gz'):
+                                file_counts['rlog.gz'] += 1
+                                file_sizes['rlog.gz'] += file_size
+                            elif file.endswith('.rlog.bz2'):
+                                file_counts['rlog.bz2'] += 1
+                                file_sizes['rlog.bz2'] += file_size
+                            elif file.endswith('.rlog'):
+                                file_counts['rlog'] += 1
+                                file_sizes['rlog'] += file_size
+                            else:
+                                file_counts['other'] += 1
+                                file_sizes['other'] += file_size
+                    
+                    dongle_total_files = sum(file_counts.values())
+                    dongle_compressed = file_counts['rlog.zst'] + file_counts['rlog.gz'] + file_counts['rlog.bz2']
+                    
+                    total_files += dongle_total_files
+                    total_compressed_files += dongle_compressed
+                    total_uncompressed_files += file_counts['rlog']
+                    total_uncompressed_size += file_sizes['rlog']
+        except:
+            pass
     
-    print("="*60)
+    print(f"Total Dongle IDs: {total_dongle_ids}")
+    print(f"Total Files: {total_files:,}")
+    
+    if total_files > 0:
+        overall_compression = (total_compressed_files / total_files) * 100
+        print(f"Overall Compression: {overall_compression:.1f}% of files compressed")
+        
+        if total_uncompressed_files > 0:
+            print(f"Uncompressed Files: {total_uncompressed_files:,} files ({format_size(total_uncompressed_size)})")
+            print(f"💡 Tip: Run compression to reduce storage usage")
+    
+    print("="*70)
 
 def main():
     print(f"Cross-platform rlog downloader (Windows/macOS/Linux)")
