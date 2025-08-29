@@ -28,7 +28,7 @@ import json
 import tempfile
 
 # ========= MODIFY THESE If you want to =========
-diroutbase = os.path.expanduser("~/Downloads/rlogs")
+diroutbase = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rlogs")
 config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices_config.json")
 
 # Transfer method: "sftp" or "rsync"
