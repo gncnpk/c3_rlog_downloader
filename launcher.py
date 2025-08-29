@@ -513,6 +513,65 @@ def run_complete_workflow():
     print_colored("🎉 Complete workflow finished successfully!", Colors.GREEN, bold=True)
     return True
 
+def run_git_update():
+    """Update the downloader using git pull"""
+    print_header("🔄 GIT UPDATE")
+    
+    print_colored("🔄 Updating Comma Rlog Downloader...", Colors.CYAN, bold=True)
+    print_colored("This will pull the latest changes from the repository.", Colors.WHITE)
+    print()
+    
+    try:
+        # Check if we're in a git repository
+        result = subprocess.run(['git', 'status'], 
+                              capture_output=True, text=True, check=True)
+        
+        print_colored("📍 Current repository status:", Colors.BLUE, bold=True)
+        print(result.stdout)
+        
+        # Get current branch
+        branch_result = subprocess.run(['git', 'branch', '--show-current'], 
+                                     capture_output=True, text=True, check=True)
+        current_branch = branch_result.stdout.strip()
+        print_colored(f"🌿 Current branch: {current_branch}", Colors.GREEN)
+        
+        # Ask for confirmation
+        print()
+        confirm = input(f"{Colors.YELLOW}Do you want to pull the latest changes? (Y/n): {Colors.END}").strip().lower()
+        if confirm and confirm not in ['y', 'yes']:
+            print_colored("❌ Update cancelled", Colors.YELLOW)
+            return False
+        
+        # Perform git pull
+        print_colored("🚀 Pulling latest changes...", Colors.BLUE, bold=True)
+        pull_result = subprocess.run(['git', 'pull'], 
+                                   capture_output=True, text=True)
+        
+        print(pull_result.stdout)
+        if pull_result.stderr:
+            print_colored("⚠️  Git messages:", Colors.YELLOW)
+            print(pull_result.stderr)
+        
+        if pull_result.returncode == 0:
+            print_colored("✅ Update completed successfully!", Colors.GREEN, bold=True)
+            print_colored("💡 If new dependencies were added, you may need to run pip install -r requirements.txt", Colors.CYAN)
+            return True
+        else:
+            print_colored(f"❌ Git pull failed with return code {pull_result.returncode}", Colors.RED)
+            return False
+            
+    except subprocess.CalledProcessError as e:
+        print_colored(f"❌ Git command failed: {e}", Colors.RED)
+        print_colored("Make sure git is installed and this is a git repository", Colors.YELLOW)
+        return False
+    except FileNotFoundError:
+        print_colored("❌ Git not found. Please install git first.", Colors.RED)
+        print_colored("Download from: https://git-scm.com/downloads", Colors.CYAN)
+        return False
+    except Exception as e:
+        print_colored(f"❌ Unexpected error during update: {e}", Colors.RED)
+        return False
+
 def show_main_menu():
     """Display the main menu"""
     print()
@@ -525,7 +584,8 @@ def show_main_menu():
     print_colored("5. 📊 Device Size Report", Colors.WHITE)
     print_colored("6. 🔄 Complete Workflow (Download + Upload)", Colors.WHITE)
     print_colored("7. ❓ Help & Information", Colors.WHITE)
-    print_colored("8. 🚪 Exit", Colors.WHITE)
+    print_colored("8. 🔄 Update Downloader", Colors.WHITE)
+    print_colored("9. 🚪 Exit", Colors.WHITE)
     print()
 
 def show_help():
@@ -575,7 +635,7 @@ def main():
         show_main_menu()
         
         try:
-            choice = input(f"{Colors.CYAN}Enter your choice (1-8): {Colors.END}").strip()
+            choice = input(f"{Colors.CYAN}Enter your choice (1-9): {Colors.END}").strip()
             
             if choice == '1':
                 run_setup()
@@ -592,11 +652,13 @@ def main():
             elif choice == '7':
                 show_help()
             elif choice == '8':
+                run_git_update()
+            elif choice == '9':
                 print_colored("\n👋 Thank you for using Comma Rlog Management Suite!", Colors.GREEN, bold=True)
                 print_colored("Happy driving! 🚗", Colors.CYAN)
                 break
             else:
-                print_colored("❌ Invalid choice. Please enter 1-8.", Colors.RED)
+                print_colored("❌ Invalid choice. Please enter 1-9.", Colors.RED)
         
         except KeyboardInterrupt:
             print_colored("\n\n👋 Goodbye!", Colors.YELLOW)
