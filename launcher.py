@@ -485,7 +485,6 @@ def run_size_report():
             return
         
         download_module.report_device_sizes_after_compression(diroutbase)
-        print_colored("✅ Size report completed!", Colors.GREEN)
         
     except Exception as e:
         print_colored(f"❌ Size report error: {e}", Colors.RED)
